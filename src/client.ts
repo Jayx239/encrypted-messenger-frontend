@@ -1,13 +1,12 @@
 import axios, { Axios, AxiosInstance } from 'axios';
+import { IRawMessage } from './model/message';
 
 export interface IEncryptedMessengerClient {
-    // register(registerRequest: IRegisterRequest): Promise<IRegisterResponse>;
+    register(registerRequest: IRegisterRequest): Promise<IRegisterResponse>;
     sendMessage(
         sendMessageRequest: ISendMessageClientRequest
     ): Promise<ISendMessageResponse>;
-    getMessages(
-        getMessagesRequest: IGetMessagesRequest
-    ): Promise<IGetMessagesResponse>;
+    getMessages(getMessagesRequest: IGetMessagesRequest): Promise<any>;
 }
 
 export interface IEncryptedMessengerClientProps {
@@ -22,18 +21,20 @@ export class EncryptedMessengerClient implements IEncryptedMessengerClient {
         this._axios = encryptedMessengerClientProps.axios;
         this.baseUrl = encryptedMessengerClientProps.baseUrl;
     }
-    // async register(
-    //     registerRequest: IRegisterRequest
-    // ): Promise<IRegisterResponse> {
-    //     return (await axios.post(`${this.baseUrl}/register`, registerRequest))
-    //         .data;
-    // }
+    async register(
+        registerRequest: IRegisterRequest
+    ): Promise<IRegisterResponse> {
+        return await (
+            await axios.post(`${this.baseUrl}/register`, registerRequest)
+        ).data;
+    }
 
     async sendMessage(
         sendMessageRequest: ISendMessageClientRequest
     ): Promise<ISendMessageResponse> {
-        return (await axios.put(`${this.baseUrl}/message`, sendMessageRequest))
-            .data;
+        return await (
+            await axios.put(`${this.baseUrl}/message`, sendMessageRequest)
+        ).data;
     }
 
     async getMessages(getMessagesRequest: IGetMessagesRequest): Promise<any> {
@@ -75,7 +76,7 @@ export interface IGetMessagesRequest {
     userId: string;
 }
 
-export interface IGetMessagesResponse {}
+export type IGetMessagesResponse = [string, IRawMessage][];
 
 export function getDefaultEncryptedMessengerClient() {
     return new EncryptedMessengerClient({

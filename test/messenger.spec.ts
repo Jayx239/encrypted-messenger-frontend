@@ -1,15 +1,16 @@
 import { webcrypto } from 'crypto';
 import { TextEncoder, TextDecoder } from 'util';
 import { Blob } from 'buffer';
-import { IEncryptedMessengerClient, ISendMessageResponse } from '../src/client';
-import { encryptMessage, getKeyPair } from '../src/encryption';
 import {
-    EncryptedMessenger,
-    IUser,
-    IUserContext,
-    base64EncodeBuffer,
-    bufferToNumberArray,
-} from '../src/messenger';
+    IEncryptedMessengerClient,
+    IGetMessagesResponse,
+    ISendMessageResponse,
+} from '../src/client';
+import { encryptMessage, getKeyPair } from '../src/util/encryption';
+import { EncryptedMessenger } from '../src/messenger';
+import { bufferToNumberArray } from '../src/util/encode';
+import { IUser } from '../src/model/user';
+import { MessageIO } from '../src/model/message';
 
 Object.defineProperty(globalThis, 'crypto', {
     value: webcrypto,
@@ -119,7 +120,7 @@ describe('EncryptedMessenger', () => {
 
     test('Messenger gets messages and decrypts', async () => {
         const encMessage = await encryptMessage(
-            messenger.userContext.encryptionKeyPair.publicKey,
+            messenger.userContext!.encryptionKeyPair.publicKey,
             rawMessage
         );
         const rawGetMessagesResponse = {
@@ -141,6 +142,41 @@ describe('EncryptedMessenger', () => {
             },
         });
     });
+
+    // test('Messenger gets messages and decrypts', async () => {
+    //     const encMessage = await encryptMessage(
+    //         messenger.userContext!.encryptionKeyPair.publicKey,
+    //         rawMessage
+    //     );
+    //     const rawGetMessagesResponse: IGetMessagesResponse = [];
+    //     const messageId = '123123-12312-3123-123-123';
+    //     rawGetMessagesResponse.push([
+    //         `${messageId}`,
+    //         {
+    //             io: MessageIO.inbound,
+    //             sentAt: 1,
+    //             messageId,
+    //             toUserId: '',
+    //             fromUserId: '',
+    //             body: bufferToNumberArray(encMessage),
+    //         },
+    //     ]);
+
+    //     console.log(rawGetMessagesResponse);
+    //     mockClient.getMessages.mockResolvedValue(rawGetMessagesResponse);
+    //     const response = await messenger.getMessages();
+
+    //     expect(response).toStrictEqual({
+    //         '123123-12312-3123-123-123': {
+    //             io: MessageIO.inbound,
+    //             sentAt: 1,
+    //             messageId,
+    //             toUserId: '',
+    //             fromUserId: '',
+    //             body: rawMessage,
+    //         },
+    //     });
+    // });
 
     // test('sendMessage should encrypt message and call client.sendMessage', async () => {
     //     mockClient.sendMessage.mockResolvedValueOnce({ success: true });

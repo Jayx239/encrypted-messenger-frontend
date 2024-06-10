@@ -1,6 +1,7 @@
-import * as encryption from './encryption';
+import * as encryption from './util/encryption';
 import * as client from './client';
 import * as messenger from './messenger';
+import { GhostMessenger, getGhostMessenger } from './messenger/ghost-messenger';
 (window as any).EncryptedMessenger = {
     encryption,
     client,
@@ -28,7 +29,12 @@ async function run() {
     window['messenger'] = messenger;
 }
 // messenger.sendMessage({toUserId: messenger.userContext.user.userId, message: "Hello world"})
-run();
+// run();
+
+async function initGhostMessenger() {
+    window['messenger'] = await getGhostMessenger();
+}
+initGhostMessenger();
 
 // async function isPasskeysAvailable() {
 //     // Availability of `window.PublicKeyCredential` means WebAuthn is usable.
