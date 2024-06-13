@@ -1,27 +1,13 @@
-import { arrayBuffer } from 'stream/consumers';
 import {
-    EncryptedMessengerClient,
     IEncryptedMessengerClient,
     IGetMessagesResponse,
     ISendMessageRequest,
     ISendMessageResponse,
     ISendMessageClientRequest,
-    getDefaultEncryptedMessengerClient,
     IRegisterResponse,
 } from './client';
-import {
-    decodeMessage,
-    decryptMessage,
-    decryptMessageAsString,
-    encryptMessage,
-    getKeyPair,
-} from './util/encryption';
-import {
-    bufferToNumberArray,
-    numberArrayToBufer,
-    convertBufferToString,
-} from './util/encode';
-import { IUser, IUserContext } from './model/user';
+import { bufferToNumberArray } from './util/encode';
+import { IBaseUserContext } from './model/user';
 import { IMessage, IRawMessage } from './model/message';
 
 export interface IEncryptedMessenger {
@@ -32,20 +18,30 @@ export interface IEncryptedMessenger {
     register(userName: string): Promise<any>;
 }
 
-export interface IEncryptedMessengerProps {
+export interface IEncryptedMessengerProps<USER_CONTEXT> {
     client: IEncryptedMessengerClient;
-    userContext?: IUserContext;
+    userContext?: USER_CONTEXT;
 }
-
-export class EncryptedMessenger implements IEncryptedMessenger {
+export interface IEncryptSendMessageResult {
+    message: number[];
+    iv?: ArrayBuffer;
+}
+export abstract class EncryptedMessenger<USER_CONTEXT extends IBaseUserContext>
+    implements IEncryptedMessenger
+{
     client: IEncryptedMessengerClient;
-    userContext?: IUserContext;
-    public readonly version: number = 1;
+    userContext?: USER_CONTEXT;
 
-    constructor(encrpytedMessengerProps: IEncryptedMessengerProps) {
+    constructor(
+        encrpytedMessengerProps: IEncryptedMessengerProps<USER_CONTEXT>
+    ) {
         this.client = encrpytedMessengerProps.client;
         this.userContext = encrpytedMessengerProps.userContext;
     }
+
+    protected abstract encryptSendMessage(
+        sendMessageRequest
+    ): Promise<IEncryptSendMessageResult>;
 
     async sendMessage(
         sendMessageRequest: ISendMessageRequest
@@ -53,22 +49,23 @@ export class EncryptedMessenger implements IEncryptedMessenger {
         if (!this.userContext) {
             return Promise.reject('You need to register first');
         }
-        let encryptionKey = await this._getSendMessageEncryptionKey(
+
+        let encryptMessageResult = await this.encryptSendMessage(
             sendMessageRequest
-        ); //this.userContext.encryptionKeyPair.publicKey
-        const encryptedMessage = await encryptMessage(
-            encryptionKey,
-            sendMessageRequest.message
         );
-
-        let message = bufferToNumberArray(encryptedMessage);
-
         const fromUserId = this.userContext.user.userId;
+
+        const message = encryptMessageResult.message;
+
+        const iv = encryptMessageResult.iv
+            ? bufferToNumberArray(encryptMessageResult.iv)
+            : undefined;
 
         const encryptedSendMessageRequest: ISendMessageClientRequest = {
             fromUserId,
             toUserId: sendMessageRequest.toUserId,
             message,
+            iv,
         };
         const response = await this.client.sendMessage(
             encryptedSendMessageRequest
@@ -93,23 +90,8 @@ export class EncryptedMessenger implements IEncryptedMessenger {
             const reader = new FileReader();
 
             return await this._handleRawMessages(messages);
-
-            // for (let value of rawMessages) {
-            //     // console.log(`Body ${value[1].body}`);
-            //     const decryptedMessage = await this._decryptMessage(
-            //         value[1].body
-            //     );
-            //     output[value[0]] = {
-            //         ...value[1],
-            //         body: decryptedMessage,
-            //     };
-            // }
-            // // );
-
-            // return output;
         } catch (e) {
             console.error(`Error getting messages: ${e}`);
-            // console.error(e);
             throw e;
         }
     }
@@ -117,31 +99,17 @@ export class EncryptedMessenger implements IEncryptedMessenger {
         return await this.client.register({ userName });
     }
 
-    /**
-     * Gets the encryption key for encrypting outbound messages.
-     * @param sendMessageRequest request to get encryption key for, should get encryption key of recipient.
-     * @returns public key
-     */
-    protected async _getSendMessageEncryptionKey(
-        sendMessageRequest: ISendMessageRequest
-    ): Promise<CryptoKey> {
-        // Note: This should be overriden, every message sent from this impl encrypts with your own key.
-        return this.userContext!.encryptionKeyPair.publicKey;
-    }
-
     protected async _handleRawMessages(
         rawMessages: Object
     ): Promise<IMessage[]> {
         let output: any = {};
         for (let value of Object.entries(rawMessages)) {
-            // console.log(`Body ${value[1].body}`);
-            const decryptedMessage = await this._decryptMessage(value[1].body);
+            const decryptedMessage = await this._decryptMessage(value[1]);
             output[value[0]] = {
                 ...value[1],
                 body: decryptedMessage,
             };
         }
-        // );
 
         return output;
     }
@@ -150,21 +118,119 @@ export class EncryptedMessenger implements IEncryptedMessenger {
         return Promise.resolve();
     }
 
-    private async _decryptMessage(message: any): Promise<string> {
-        return await decryptMessageAsString(
-            message,
-            this.userContext!.encryptionKeyPair.privateKey
-        );
-    }
+    protected abstract _decryptMessage(message: IRawMessage): Promise<string>;
 }
 
-export async function getEncryptedMessenger(user: IUser) {
-    const keyPair = await getKeyPair();
-    return new EncryptedMessenger({
-        client: getDefaultEncryptedMessengerClient(),
-        userContext: {
-            encryptionKeyPair: keyPair,
-            user,
-        },
-    });
-}
+// export abstract class EncryptedMessengerRSA extends EncryptedMessenger<IUserContext> {
+//     public readonly version: string = 'RSA.1';
+
+//     constructor(
+//         encrpytedMessengerProps: IEncryptedMessengerProps<IUserContext>
+//     ) {
+//         super(encrpytedMessengerProps);
+//     }
+
+//     /**
+//      * Gets the encryption key for encrypting outbound messages.
+//      * @param sendMessageRequest request to get encryption key for, should get encryption key of recipient.
+//      * @returns public key
+//      */
+//     protected abstract _getSendMessageEncryptionKey(
+//         sendMessageRequest: ISendMessageRequest
+//     ); /*: Promise<CryptoKey> {
+//         // Note: This should be overriden, every message sent from this impl encrypts with your own key.
+//         return this.userContext!.encryptionKeyPair.publicKey;
+//     } */
+
+//     protected async _handleRawMessages(
+//         rawMessages: Object
+//     ): Promise<IMessage[]> {
+//         let output: any = {};
+//         for (let value of Object.entries(rawMessages)) {
+//             // console.log(`Body ${value[1].body}`);
+//             const decryptedMessage = await this._decryptMessage(value[1]);
+//             output[value[0]] = {
+//                 ...value[1],
+//                 body: decryptedMessage,
+//             };
+//         }
+//         // );
+
+//         return output;
+//     }
+
+//     protected async _onSendMessageResponse(response): Promise<void> {
+//         return Promise.resolve();
+//     }
+
+//     protected async _decryptMessage(message: any): Promise<string> {
+//         return await decryptMessageAsString(
+//             message,
+//             this.userContext!.encryptionKeyPair.privateKey
+//         );
+//     }
+// }
+
+// export abstract class EncryptedMessengerAES extends EncryptedMessenger<IUserContextAES> {
+//     client: IEncryptedMessengerClient;
+//     public readonly version: string = 'AES.1';
+
+//     constructor(
+//         encrpytedMessengerProps: IEncryptedMessengerProps<IUserContextAES>
+//     ) {
+//         super(encrpytedMessengerProps);
+//         this.client = encrpytedMessengerProps.client;
+//         this.userContext = encrpytedMessengerProps.userContext;
+//     }
+
+//     /**
+//      * Gets the encryption key for encrypting outbound messages.
+//      * @param sendMessageRequest request to get encryption key for, should get encryption key of recipient.
+//      * @returns public key
+//      */
+//     protected abstract _getSendMessageEncryptionKey(
+//         sendMessageRequest: ISendMessageRequest
+//     ); /*: Promise<CryptoKey> {
+//         // Note: This should be overriden, every message sent from this impl encrypts with your own key.
+//         return this.userContext!.encryptionKeyPair.publicKey;
+//     } */
+
+//     protected async _handleRawMessages(
+//         rawMessages: Object
+//     ): Promise<IMessage[]> {
+//         let output: any = {};
+//         for (let value of Object.entries(rawMessages)) {
+//             // console.log(`Body ${value[1].body}`);
+//             const decryptedMessage = await this._decryptMessage(value[1]);
+//             output[value[0]] = {
+//                 ...value[1],
+//                 body: decryptedMessage,
+//             };
+//         }
+//         // );
+
+//         return output;
+//     }
+
+//     protected async _onSendMessageResponse(response): Promise<void> {
+//         return Promise.resolve();
+//     }
+
+//     protected async _decryptMessage(message: IRawMessage): Promise<string> {
+//         return await decryptMessageAsString(
+//             message.body,
+//             this.userContext!.encryptionKey
+//         );
+//     }
+// }
+
+// export async function getEncryptedMessenger(user: IUser) {
+//     const keyPair = await getKeyPair();
+//     return new EncryptedMessengerRSA({
+//         client: getDefaultEncryptedMessengerClient(),
+//         userContext: {
+//             encryptionKeyPair: keyPair,
+//             user,
+//         },
+//     });
+// }

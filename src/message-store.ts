@@ -1,5 +1,4 @@
-import { IOType } from 'child_process';
-import { IRawMessage, MessageIO } from './model/message';
+import { MessageIO } from './model/message';
 import { IUser } from './model/user';
 
 export interface IMessageStoreMessage {
@@ -12,6 +11,7 @@ export interface IMessageStoreMessage {
      * If sent or received
      */
     io: MessageIO;
+    iv?: BufferSource;
 }
 
 export interface IMessageStore<MESSAGE_TYPE> {

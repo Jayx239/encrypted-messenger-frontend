@@ -61,20 +61,15 @@ export async function decryptMessageAsString(
     privateKey: CryptoKey
 ): Promise<string> {
     let mappedMessage;
-    // const messageType = typeof message;
-    // switch (messageType) {
-    //     case 'object':
     mappedMessage = numberArrayToBufer(message);
-    //         break;
-    //     default:
-    //         throw new Error(
-    //             `Invalid message type for decryption ${messageType}`
-    //         );
-    // }
 
-    // console.log(`MappedMessage: ${mappedMessage}`);
     const decryptedMessage = await decryptMessage(privateKey, mappedMessage);
     let decryptedString = convertBufferToString(decryptedMessage);
-    // console.log(`Decrypted string: ${decryptedString}`);
+
     return decryptedString;
+}
+
+export interface IEncryptMessageResult {
+    message: ArrayBuffer;
+    iv?: ArrayBuffer;
 }

@@ -3,7 +3,6 @@ import {
     ISendMessageResponse,
     IGetMessagesResponse,
     IRegisterResponse,
-    getDefaultEncryptedMessengerClient,
 } from '../client';
 import {
     IMessageStore,
@@ -15,31 +14,26 @@ import {
     IEncryptedMessenger,
     IEncryptedMessengerProps,
 } from '../messenger';
-import { IMessage, IRawMessage, MessageIO } from '../model/message';
-import { IUser, IUserContext } from '../model/user';
-import {
-    decryptArrayBufferAsString,
-    decryptMessage,
-    decryptMessageAsString,
-    encryptMessage,
-    getKeyPair,
-} from '../util/encryption';
-import { FriendStore, IFriendsStore } from './friends-store';
+import { IMessage, MessageIO } from '../model/message';
+import { IBaseUserContext } from '../model/user';
+import { IEncryptMessageResult, getKeyPair } from '../util/encryption';
+import { FriendStore, IFriend, IFriendsStore } from './friends-store';
 
 export interface IGhostMessenger extends IEncryptedMessenger {}
 
-export interface IGhostManagerProps extends IEncryptedMessengerProps {
+export interface IGhostManagerProps<USER_CONTEXT extends IBaseUserContext>
+    extends IEncryptedMessengerProps<USER_CONTEXT> {
     existingMessageStore?: IMessageStore<IMessageStoreMessage>;
     existingFriendsStore?: IFriendsStore;
 }
 
-export class GhostMessenger
-    extends EncryptedMessenger
+export abstract class GhostMessenger<USER_CONTEXT extends IBaseUserContext>
+    extends EncryptedMessenger<USER_CONTEXT>
     implements IGhostMessenger
 {
-    private readonly _messageStore: IMessageStore<IMessageStoreMessage>;
-    private readonly _friends: IFriendsStore;
-    constructor(props: IGhostManagerProps) {
+    protected readonly _messageStore: IMessageStore<IMessageStoreMessage>;
+    protected readonly _friends: IFriendsStore;
+    constructor(props: IGhostManagerProps<USER_CONTEXT>) {
         super(props);
         this._messageStore = props.existingMessageStore ?? new MessageStore(); //TODO: call constructor of actual impl class once created for default
         this._friends = props.existingFriendsStore ?? new FriendStore();
@@ -49,7 +43,6 @@ export class GhostMessenger
         sendMessageRequest: ISendMessageRequest
     ): Promise<ISendMessageResponse> {
         const response = await super.sendMessage(sendMessageRequest);
-        // this._messageStore.addMessage();
         await this._storeSendMessage(sendMessageRequest, response);
         return response;
     }
@@ -68,22 +61,17 @@ export class GhostMessenger
         }
         let encryptionKeys = await getKeyPair();
         const response = (await super.register(userName)) as any;
-        const userContext: IUserContext = {
-            user: {
-                userId: response.user_id,
-                userName: response.user_name, // TODO: fix serialization of key name from rust code.
-            },
-            encryptionKeyPair: encryptionKeys,
-        };
-
-        this.userContext = userContext;
-
-        this._friends.addFriend({
-            publicKey: userContext.encryptionKeyPair.publicKey,
-            user: userContext.user,
-        });
+        this._handleRegisterResponse(response, encryptionKeys);
 
         return response;
+    }
+    protected abstract _handleRegisterResponse(
+        response: any,
+        encryptionKeys: CryptoKeyPair
+    ): Promise<void>;
+
+    protected async _addFriend(friend: IFriend): Promise<void> {
+        await this._friends.addFriend(friend);
     }
 
     async getCachedMessages(): Promise<IMessage[]> {
@@ -97,21 +85,11 @@ export class GhostMessenger
                 sentAt: message.sentAt,
                 toUserId: message.toUser.userId,
                 fromUserId: message.fromUser.userId,
-                body: await decryptArrayBufferAsString(
-                    message.message,
-                    this.userContext!.encryptionKeyPair.privateKey
-                ),
+                body: await this.decryptMessageFromStorageAsString(message),
             });
         }
 
         return output;
-    }
-
-    protected async _getSendMessageEncryptionKey(
-        sendMessageRequest: ISendMessageRequest
-    ): Promise<CryptoKey> {
-        return this._friends.getFriendById(sendMessageRequest.toUserId)!
-            .publicKey;
     }
 
     private async _storeSendMessage(
@@ -121,18 +99,33 @@ export class GhostMessenger
         const { message, toUserId } = sendMessageRequest;
         const toFriend = this._friends.getFriendById(toUserId);
         const userContext = this.userContext!;
-
-        const encryptedMessage = await encryptMessage(
-            userContext.encryptionKeyPair.publicKey,
-            message
-        );
-        const messageStoreMessage: IMessageStoreMessage = {
+        const messageId =
+            sendMessageResponse.messageId ?? sendMessageResponse['message_id']; //TODO fix once serialization is fixed on rust code
+        const messageToStore: IMessage = {
             sentAt: Date.now(), // TODO: Pull from response
-            messageId: sendMessageResponse.messageId,
-            message: encryptedMessage,
+            messageId,
+            body: message,
+            toUserId: toFriend!.user.userId,
+            fromUserId: userContext.user.userId,
+            io: MessageIO.outbound,
+        };
+
+        const encryptedMessage = await this._encryptMessageForStorage(
+            messageToStore
+        );
+
+        // await encryptMessage(
+        //     userContext.encryptionKeyPair.publicKey,
+        //     message
+        // );
+        const messageStoreMessage: IMessageStoreMessage = {
+            sentAt: messageToStore.sentAt, // TODO: Pull from response
+            messageId,
+            message: encryptedMessage.message,
             toUser: toFriend!.user,
             fromUser: userContext.user,
             io: MessageIO.outbound,
+            iv: encryptedMessage.iv,
         };
 
         this._messageStore.addMessage(messageStoreMessage);
@@ -144,32 +137,27 @@ export class GhostMessenger
         // for (const message of messages) {
         for (let i = 0; i < messages.length; i++) {
             const message = messages[i];
-            const encryptedMessage = await encryptMessage(
-                userContext.encryptionKeyPair.publicKey,
-                message.body
+            const encryptedMessage = await this._encryptMessageForStorage(
+                message
             );
             const messageStoreMessage: IMessageStoreMessage = {
                 sentAt: message.sentAt,
                 io: MessageIO.inbound,
                 messageId: message.messageId,
-                message: encryptedMessage,
+                message: encryptedMessage.message,
                 toUser: userContext.user,
                 fromUser: this._friends.getFriendById(message.fromUserId)!.user,
+                iv: message.iv,
             };
             this._messageStore.addMessage(messageStoreMessage);
         }
     }
-    // protected async _decryptMessage(message: any): Promise<string> {
-    //     return await decryptArrayBufferAsString(
-    //         message,
-    //         this.userContext!.encryptionKeyPair.privateKey
-    //     );
-    // }
-}
 
-export async function getGhostMessenger() {
-    const keyPair = await getKeyPair();
-    return new GhostMessenger({
-        client: getDefaultEncryptedMessengerClient(),
-    });
+    protected abstract _encryptMessageForStorage(
+        message: IMessage
+    ): Promise<IEncryptMessageResult>;
+
+    protected abstract decryptMessageFromStorageAsString(
+        message: IMessageStoreMessage
+    ): Promise<string>;
 }

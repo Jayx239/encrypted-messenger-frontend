@@ -1,7 +1,7 @@
 import * as encryption from './util/encryption';
 import * as client from './client';
 import * as messenger from './messenger';
-import { GhostMessenger, getGhostMessenger } from './messenger/ghost-messenger';
+import { getGhostMessengerAES } from './messenger/ghost-messenger-aes';
 (window as any).EncryptedMessenger = {
     encryption,
     client,
@@ -32,7 +32,8 @@ async function run() {
 // run();
 
 async function initGhostMessenger() {
-    window['messenger'] = await getGhostMessenger();
+    // window['messenger'] = await getGhostMessengerRSA();
+    window['messenger'] = await getGhostMessengerAES();
 }
 initGhostMessenger();
 

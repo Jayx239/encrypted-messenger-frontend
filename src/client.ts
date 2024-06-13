@@ -1,4 +1,4 @@
-import axios, { Axios, AxiosInstance } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { IRawMessage } from './model/message';
 
 export interface IEncryptedMessengerClient {
@@ -64,6 +64,7 @@ export interface ISendMessageClientRequest {
     fromUserId: string;
     toUserId: string;
     message: number[];
+    iv?: number[];
 }
 
 export interface ISendMessageResponse {
